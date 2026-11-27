@@ -6161,3 +6161,30 @@
   pointer-events:none;
 }
 .quick-action-panel-overlay:not(.error-diagnostics-overlay) > .quick-action-popover {pointer-events:auto;}
+
+/* Visible native checkboxes share the established circular black selection style. Hidden proxy inputs and switches retain their own controls. */
+:root input[type="checkbox"]:not([role="switch"]):not(.switch-input):not(.sr-only):not(.peer):not(.opacity-0):not([hidden]):not([class*="toggle" i]):not([class*="switch" i]) {
+  appearance:none;-webkit-appearance:none;
+  display:inline-grid;place-content:center;
+  flex:0 0 16px;width:16px;height:16px;min-width:16px;min-height:16px;
+  padding:0;margin:0;vertical-align:middle;
+  border:1.5px solid var(--c-text, #353535);
+  border-radius:50%;background:transparent;
+  box-sizing:border-box;cursor:pointer;
+}
+:root input[type="checkbox"]:not([role="switch"]):not(.switch-input):not(.sr-only):not(.peer):not(.opacity-0):not([hidden]):not([class*="toggle" i]):not([class*="switch" i])::before {
+  content:"";width:7px;height:4px;border:solid #fff;border-width:0 0 2px 2px;
+  transform:translateY(-1px) rotate(-45deg) scale(0);transform-origin:center;
+}
+:root input[type="checkbox"]:not([role="switch"]):not(.switch-input):not(.sr-only):not(.peer):not(.opacity-0):not([hidden]):not([class*="toggle" i]):not([class*="switch" i]):checked {
+  background:#1e1e1e;border-color:#1e1e1e;
+}
+:root input[type="checkbox"]:not([role="switch"]):not(.switch-input):not(.sr-only):not(.peer):not(.opacity-0):not([hidden]):not([class*="toggle" i]):not([class*="switch" i]):checked::before {
+  transform:translateY(-1px) rotate(-45deg) scale(1);
+}
+:root input[type="checkbox"]:not([role="switch"]):not(.switch-input):not(.sr-only):not(.peer):not(.opacity-0):not([hidden]):not([class*="toggle" i]):not([class*="switch" i]):focus-visible {
+  outline:2px solid var(--c-icon-active, #6d8cef);outline-offset:3px;
+}
+:root input[type="checkbox"]:not([role="switch"]):not(.switch-input):not(.sr-only):not(.peer):not(.opacity-0):not([hidden]):not([class*="toggle" i]):not([class*="switch" i]):disabled {
+  cursor:not-allowed;opacity:.45;
+}

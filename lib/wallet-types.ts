@@ -42,7 +42,21 @@ export type WalletTransaction = {
   credit?: boolean;
 };
 
+export type WalletFixedRule = {
+  id: string; title: string; kind: "income" | "expense" | "debt"; currency: WalletCurrency;
+  amount: number; day: number | "last"; startMonth: string; endMonth?: string; enabled: boolean;
+  debtTarget?: "credit" | "loan"; principal?: number; principalPerPayment?: number;
+};
+export type WalletFixedSettlement = { status: "paid" | "pending" | "no_debt"; amount: number; at: string };
+export type WalletReceipt = Pick<WalletTransaction,"id"|"amount"|"currency"|"kind"|"credit"|"cardId"|"accountType">;
 export type WalletState = {
+  financeEpoch?: string;
+  resetAt?: string;
+  fixedRules?: WalletFixedRule[];
+  fixedSettlements?: Record<string, WalletFixedSettlement>;
+  fixedDebtBalances?: Record<string, number>;
+  processedReferences?: Record<string, WalletReceipt>;
+  blockedMessageIds?: string[];
   balance: number;
   cards: WalletCard[];
   transactions: WalletTransaction[];

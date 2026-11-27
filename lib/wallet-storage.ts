@@ -1,3 +1,4 @@
+import {normalizeWalletFixedRules} from "./wallet-fixed-rules";
 import { kvGet, kvRemove, kvSet, registerDynamicPrefix, registerKvMigration } from "./kv-db";
 import { loadBindingConfig, loadUserIdentities, resolveUserIdentity } from "./settings-storage";
 import type { WalletAccountType, WalletCard, WalletCurrency, WalletPaymentInput, WalletPaymentResult, WalletState, WalletTransaction } from "./wallet-types";
@@ -89,6 +90,7 @@ function isUnchangedLegacyCopy(walletRaw: string, legacyRaw: string): boolean {
   try {
     const current = migrateLegacyParsedState(JSON.parse(walletRaw) as Record<string, unknown>);
     const legacy = migrateLegacyParsedState(JSON.parse(legacyRaw) as Record<string, unknown>);
+    if(current.financeEpoch)return false;
     return current.balance === legacy.balance
       && JSON.stringify(current.currencyBalances || {}) === JSON.stringify(legacy.currencyBalances || {})
       && JSON.stringify(current.creditDebts || {}) === JSON.stringify(legacy.creditDebts || {})
@@ -261,9 +263,16 @@ function normalizeWalletState(state: WalletState): WalletState {
   const defaultCardId = debitCard.id;
   const cnyTotal = normalizeMoney(state.balance) + cards.reduce((sum, card) => sum + normalizeMoney(card.balance), 0);
   return {
+    financeEpoch: typeof state.financeEpoch === "string" ? state.financeEpoch : undefined,
+    resetAt: state.resetAt && Number.isFinite(Date.parse(state.resetAt)) ? state.resetAt : undefined,
+    fixedRules: normalizeWalletFixedRules(state.fixedRules, WALLET_CURRENCIES),
+    fixedSettlements: state.fixedSettlements || {},
+    fixedDebtBalances: state.fixedDebtBalances || {},
+    processedReferences: state.processedReferences || {},
+    blockedMessageIds: Array.isArray(state.blockedMessageIds) ? state.blockedMessageIds.filter(id=>typeof id==='string') : [],
     balance: cnyTotal,
     cards: [{ ...debitCard, bankLabel: debitCard.bankLabel === "CHAT WALLET" ? (({ CNY: "中国银行", KRW: "新韩银行", JPY: "三菱UFJ银行", USD: "Chase", EUR: "BNP Paribas", HKD: "汇丰银行", TWD: "中国信托", AUD: "Commonwealth Bank" } as Record<string, string>)[state.primaryCurrency] || "当地银行") : debitCard.bankLabel, isDefault: true, balance: 0, title: "储蓄卡" }],
-    transactions: state.transactions.slice().sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
+    transactions: state.transactions.map(normalizeTransaction).filter((tx): tx is WalletTransaction => !!tx).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)),
     defaultCardId,
     updatedAt: state.updatedAt || now,
     currencyBalances: Object.fromEntries(WALLET_CURRENCIES.filter(currency => currency !== "CNY").map(currency => [currency, roundWalletMoney(Math.max(0, Number(state.currencyBalances?.[currency]) || 0), currency)])),
@@ -326,6 +335,9 @@ function migrateLegacyParsedState(parsed: Record<string, unknown>): WalletState 
     : [];
   const defaultCardId = cleanText(parsed.defaultCardId, 120);
   return normalizeWalletState({
+    financeEpoch: parsed.financeEpoch as WalletState["financeEpoch"], resetAt: parsed.resetAt as WalletState["resetAt"],
+    fixedRules: parsed.fixedRules as WalletState["fixedRules"], fixedSettlements: parsed.fixedSettlements as WalletState["fixedSettlements"],
+    fixedDebtBalances: parsed.fixedDebtBalances as WalletState["fixedDebtBalances"], processedReferences: parsed.processedReferences as WalletState["processedReferences"], blockedMessageIds: parsed.blockedMessageIds as WalletState["blockedMessageIds"],
     balance,
     cards: normalizedCards,
     transactions,
@@ -354,8 +366,7 @@ export function loadWalletState(ownerId?: string, userIdentityId?: string): Wall
     if (!raw) {
       const next = createDefaultWalletState();
       if (ownerId) { next.balance = 0; next.transactions = []; next.primaryCurrency = "KRW"; next.displayCurrency = "KRW"; next.cards[0].bankLabel = "新韩银行"; }
-      saveWalletState(next, ownerId, userIdentityId);
-      return next;
+      return saveWalletState(next, ownerId, userIdentityId);
     }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const next = migrateLegacyParsedState(parsed);
@@ -364,12 +375,13 @@ export function loadWalletState(ownerId?: string, userIdentityId?: string): Wall
   } catch {
     const next = createDefaultWalletState();
     if (ownerId) { next.balance = 0; next.transactions = []; next.primaryCurrency = "KRW"; next.displayCurrency = "KRW"; next.cards[0].bankLabel = "新韩银行"; }
-    saveWalletState(next, ownerId, userIdentityId);
-    return next;
+    return saveWalletState(next, ownerId, userIdentityId);
   }
 }
 
-export function saveWalletState(state: WalletState, ownerId?: string, userIdentityId?: string): WalletState {
+export function saveWalletState(state: WalletState, ownerId?: string, userIdentityId?: string, replaceEpoch = false): WalletState {
+  const raw=kvGet(walletKey(ownerId,userIdentityId));
+  if(raw&&!replaceEpoch){let epoch:string|undefined;try{epoch=JSON.parse(raw).financeEpoch;}catch{}if(epoch&&epoch!==state.financeEpoch)throw new Error("钱包已重置，旧操作没有写入，请重新打开后重试。");}
   const next = normalizeWalletState({ ...state, updatedAt: new Date().toISOString() });
   kvSet(walletKey(ownerId, userIdentityId), JSON.stringify(next));
   if (typeof window !== "undefined") {
@@ -606,10 +618,11 @@ export function getWalletCurrencyBalance(state: WalletState, currency: WalletCur
 }
 
 export function getWalletAssetEstimate(state: WalletState, currency: WalletCurrency = state.displayCurrency): number {
-  return roundWalletMoney(WALLET_CURRENCIES.reduce((sum, item) => sum + (getWalletCurrencyBalance(state, item) - (state.creditDebts?.[item] || 0)) * WALLET_REFERENCE_RATES[item] / WALLET_REFERENCE_RATES[currency], 0), currency);
+  return roundWalletMoney(WALLET_CURRENCIES.reduce((sum, item) => sum + (getWalletCurrencyBalance(state, item) - (state.creditDebts?.[item] || 0) - (state.fixedRules||[]).filter(r=>r.kind==="debt"&&r.debtTarget==="loan"&&r.currency===item).reduce((sum,r)=>sum+(state.fixedDebtBalances?.[r.id]??r.principal??0),0)) * WALLET_REFERENCE_RATES[item] / WALLET_REFERENCE_RATES[currency], 0), currency);
 }
 
 export type WalletLedgerInput = {
+  expectedEpoch?: string;
   ownerId?: string;
   userIdentityId?: string;
   currency: WalletCurrency;
@@ -629,6 +642,8 @@ export type WalletLedgerInput = {
 
 export function recordWalletPayment(input: WalletLedgerInput): WalletPaymentResult {
   const state = loadWalletState(input.ownerId, input.userIdentityId);
+  const receipt=findWalletReceipt(state,input,"payment");if(receipt)return {ok:true,state,transaction:receipt};
+  const obsolete=walletObsoleteInput(state,input);if(obsolete)return {ok:false,state,error:obsolete};
   const originalAmount = roundWalletMoney(input.amount, input.currency);
   if (!Number.isFinite(originalAmount) || originalAmount <= 0) return { ok: false, state, error: "付款金额无效。" };
   if (input.relatedOrderId) {
@@ -673,12 +688,15 @@ export function recordWalletPayment(input: WalletLedgerInput): WalletPaymentResu
 
 export function recordWalletCredit(input: WalletLedgerInput): WalletPaymentResult {
   const state = loadWalletState(input.ownerId, input.userIdentityId);
+  const receipt=findWalletReceipt(state,input,"credit");if(receipt)return {ok:true,state,transaction:receipt};
+  const obsolete=walletObsoleteInput(state,input);if(obsolete)return {ok:false,state,error:obsolete};
   const originalAmount = roundWalletMoney(input.amount, input.currency);
   if (!Number.isFinite(originalAmount) || originalAmount <= 0) return { ok: false, state, error: "入账金额无效。" };
   if (input.relatedMessageId) {
     const existing = state.transactions.find(tx => tx.relatedMessageId === input.relatedMessageId && tx.amount > 0);
     if (existing) return { ok: true, state, transaction: existing };
   }
+  if(input.relatedOrderId){const old=state.transactions.find(t=>t.relatedOrderId===input.relatedOrderId&&t.amount>0&&!t.credit);if(old)return {ok:true,state,transaction:old};}
   const target = input.sourceCurrency ?? (state.autoConvertReceived ? state.primaryCurrency : input.currency);
   const credited = target === input.currency ? originalAmount : exchangeWalletAmount(originalAmount, input.currency, target);
   if (credited <= 0) return { ok: false, state, error: "换算后金额过小，无法入账。" };
@@ -707,6 +725,7 @@ export function convertWalletCurrency(input:{from:WalletCurrency;to:WalletCurren
   const valid=[state.primaryCurrency,...(state.commonCurrencies||[])];
   if(from===to || !WALLET_CURRENCIES.includes(from) || !WALLET_CURRENCIES.includes(to) || !valid.includes(to)) return {ok:false,state,error:"请从已设置的其他常用币种中选择目标币种。"};
   if(input.requestId){const old=state.transactions.find(t=>t.kind==="currency_exchange"&&t.relatedOrderId===input.requestId);if(old)return {ok:true,state,transaction:old};}
+  if(input.requestId){const old=findWalletReceipt(state,{currency:from,amount:input.amount, title:"兑换",relatedOrderId:input.requestId},"exchange");if(old)return {ok:true,state,transaction:old};}
   if(!Number.isFinite(input.amount)||input.amount<=0) return {ok:false,state,error:"请输入有效兑换金额。"};
   const amount=roundWalletMoney(input.amount,from);
   const available=getWalletCurrencyBalance(state,from);
@@ -762,4 +781,31 @@ export function repayWalletCredit(ownerId: string | undefined, currency: WalletC
 export function getWalletVisibleCurrencies(state: WalletState): WalletCurrency[] {
   const used = state.transactions.map(tx => tx.currency).filter((currency): currency is WalletCurrency => Boolean(currency));
   return WALLET_CURRENCIES.filter(currency => currency === state.primaryCurrency || state.commonCurrencies?.includes(currency) || getWalletCurrencyBalance(state, currency) !== 0 || (state.creditDebts?.[currency] || 0) !== 0 || used.includes(currency));
+}
+
+
+/** Minimal technical receipts survive a reset; no titles, descriptions, old balances or AI context. */
+export function walletResetReceipts(state:WalletState):NonNullable<WalletState["processedReferences"]>{
+ const receipts={...state.processedReferences};
+ for(const tx of state.transactions){
+  const kind=tx.kind==='currency_exchange'?'exchange':tx.kind==='payment'?'payment':tx.amount>0&&!tx.credit?'credit':undefined;
+  if(!kind)continue;
+  const receipt={id:tx.id,amount:tx.amount,currency:tx.currency,kind:tx.kind,credit:tx.credit,cardId:tx.cardId,accountType:tx.accountType};
+  if(tx.relatedOrderId)receipts[`${kind}:order:${tx.relatedOrderId}`]=receipt;
+  if(tx.relatedMessageId)receipts[`${kind}:message:${tx.relatedMessageId}`]=receipt;
+ }
+ return receipts;
+}
+function findWalletReceipt(state:WalletState,input:WalletLedgerInput,kind:string):WalletTransaction|undefined{
+ const receipt=(input.relatedOrderId?state.processedReferences?.[`${kind}:order:${input.relatedOrderId}`]:undefined)||(input.relatedMessageId?state.processedReferences?.[`${kind}:message:${input.relatedMessageId}`]:undefined);
+ if(!receipt)return;
+ return {...receipt,title:'已处理交易',detail:'旧账本已处理，本次不重复结算',createdAt:state.resetAt||state.updatedAt,category:'交易凭证',source:'app',balanceAfter:receipt.credit?state.creditDebts?.[receipt.currency||'CNY']||0:getWalletCurrencyBalance(state,receipt.currency||'CNY')};
+}
+function walletObsoleteInput(state:WalletState,input:WalletLedgerInput):string|undefined{
+ if(input.expectedEpoch!==undefined&&input.expectedEpoch!==(state.financeEpoch||''))return '钱包版本已变化，旧生成请求没有写入。';
+ if(!state.resetAt||input.source==='generated'||input.source==='manual')return;
+ const reset=Date.parse(state.resetAt),refs=[input.relatedMessageId,input.relatedOrderId].filter((v):v is string=>!!v);
+ if(refs.some(ref=>(state.blockedMessageIds||[]).some(id=>ref===id||ref.startsWith(id+':'))))return '这是重置前的交易，不能写入新钱包。';
+ if(input.createdAt&&Date.parse(input.createdAt)<reset)return '这是重置前的账务，不能写入新钱包。';
+ if(refs.some(ref=>{const m=ref.match(/(?:^|[_:-])(\d{13})(?:[_:-]|$)/);return m&&Number(m[1])<reset;}))return '这是重置前的交易，不能写入新钱包。';
 }

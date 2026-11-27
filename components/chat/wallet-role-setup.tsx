@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {WalletFixedRuleEditor} from "./wallet-fixed-rule-editor";
+import {settleWalletFixedRules} from "@/lib/wallet-life-generation";
 import { refreshWalletLiving } from "@/lib/wallet-life-generation";
 import { WALLET_CURRENCIES, WALLET_UPDATED_EVENT, loadWalletState, saveWalletState } from "@/lib/wallet-storage";
 import type { WalletCurrency, WalletState } from "@/lib/wallet-types";
@@ -17,7 +19,7 @@ export function WalletRoleSetup({ ownerId, ownerName }: { ownerId: string; owner
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   useEffect(() => {
-    setWallet(loadWalletState(ownerId)); setNotice("");
+    setWallet(settleWalletFixedRules(ownerId)); setNotice("");
     const sync = (event: Event) => {
       if ((event as CustomEvent<{ ownerId?: string }>).detail?.ownerId === ownerId) setWallet(loadWalletState(ownerId));
     };
@@ -41,7 +43,7 @@ export function WalletRoleSetup({ ownerId, ownerName }: { ownerId: string; owner
     finally { setBusy(false); }
   }
   return <section className="wallet-role-setup" style={{ fontSize: size(12), lineHeight: 1.45 }}>
-    <p style={{ margin: "0 0 15px", color: "var(--wallet-secondary, #888)", fontSize: size(11.5) }}>设置 {ownerName} 的用币习惯，然后盲刷资产。这里不会展示金额和流水。</p>
+    <p style={{ margin: "0 0 15px", color: "var(--wallet-secondary, #888)", fontSize: size(11.5) }}>设置 {ownerName} 的用币习惯，然后盲刷资产。这里只展示财务配置，不展示实际余额和流水。</p>
     <label style={labelStyle}>默认结算币种
       <select className="ui-input" value={wallet.primaryCurrency} onChange={event => { const currency = event.target.value as WalletCurrency; update({ primaryCurrency: currency, commonCurrencies: wallet.commonCurrencies?.filter(item => item !== currency), cards: wallet.cards.map(card => Object.values(banks).includes(card.bankLabel) ? { ...card, bankLabel: banks[currency] } : card) }); }}>
         {WALLET_CURRENCIES.map(currency => <option key={currency} value={currency}>{names[currency]} · {currency}</option>)}
@@ -60,6 +62,7 @@ export function WalletRoleSetup({ ownerId, ownerName }: { ownerId: string; owner
     <label style={{ ...labelStyle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>收到外币自动换成默认币种<input type="checkbox" checked={wallet.autoConvertReceived} onChange={event => update({ autoConvertReceived: event.target.checked })}/></label>
     <label style={labelStyle}>经济情况（可以模糊填写）<input className="ui-input" value={wallet.wealthLevel || ""} onChange={event => update({ wealthLevel: event.target.value })} placeholder="例如：收入稳定，花钱谨慎"/></label>
     <label style={labelStyle}>收入来源（可以模糊填写）<input className="ui-input" value={wallet.incomeSources || ""} onChange={event => update({ incomeSources: event.target.value })} placeholder="例如：工作收入、家人偶尔补贴"/></label>
+    <WalletFixedRuleEditor hideBalances wallet={wallet} onChange={rules=>{const current=loadWalletState(ownerId);const debts={...current.fixedDebtBalances};for(const r of rules){const old=current.fixedRules?.find(v=>v.id===r.id);if(r.kind==="debt"&&r.debtTarget==="loan"&&(!old||old.principal!==r.principal))debts[r.id]=r.principal||0;}setWallet(saveWalletState({...current,fixedRules:rules,fixedDebtBalances:debts},ownerId));}}/>
     <label style={{ ...labelStyle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>开通信用卡<input type="checkbox" checked={wallet.creditEnabled} onChange={event => {
       if (!event.target.checked && Object.values(wallet.creditDebts || {}).some(amount => (amount || 0) > 0)) { setNotice("当前无法关闭信用卡，请到角色手机查看原因。"); return; }
       update({ creditEnabled: event.target.checked, creditMaskedNumber: wallet.creditMaskedNumber || `**** **** **** ${String(Math.floor(Math.random() * 10000)).padStart(4, "0")}` });

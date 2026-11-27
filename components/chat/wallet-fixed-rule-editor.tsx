@@ -1,0 +1,26 @@
+"use client";
+import {useState} from "react";
+import {Plus,Pencil,Trash2} from "lucide-react";
+import type {WalletFixedRule,WalletState} from "@/lib/wallet-types";
+import {WALLET_CURRENCIES,formatCurrencyAmount} from "@/lib/wallet-storage";
+import {normalizeWalletFixedRules,walletMonth} from "@/lib/wallet-fixed-rules";
+import s from "./wallet-tools.module.css";
+export function WalletFixedRuleEditor({wallet,onChange,hideBalances=false}:{wallet:WalletState;hideBalances?:boolean;onChange:(rules:WalletFixedRule[])=>void}){
+ const [draft,setDraft]=useState<WalletFixedRule|null>(null),[error,setError]=useState('');
+ const change=(patch:Partial<WalletFixedRule>)=>setDraft(v=>v?{...v,...patch}:v);
+ function save(){if(!draft)return;const valid=normalizeWalletFixedRules([draft],WALLET_CURRENCIES);if(!valid.length){setError('请填写名称、有效金额和月份；贷款本金及每月本金也需填写完整。');return;}onChange([...(wallet.fixedRules||[]).filter(r=>r.id!==draft.id),valid[0]]);setDraft(null);setError('');}
+ return <section className={s.rules}><div className={s.heading}><b>固定收支规则 · 选填</b><button type="button" className={s.smallButton} onClick={()=>{setDraft({id:`rule_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,title:'',kind:'income',currency:wallet.primaryCurrency,amount:0,day:1,startMonth:walletMonth(),enabled:true});setError('');}}><Plus size={14}/>添加</button></div>
+ <p className={s.note}>首次资产生成后生效。打开或刷新钱包时按月补记，不设定时器、不调用 AI；未填规则时沿用自然流水。</p>
+ {(wallet.fixedRules||[]).map(rule=><div className={s.rule} key={rule.id}><div className={s.heading}><b>{rule.title}</b><label className={s.enabled}><input type="checkbox" checked={rule.enabled} onChange={e=>onChange((wallet.fixedRules||[]).map(r=>r.id===rule.id?{...r,enabled:e.target.checked}:r))}/>启用</label><button type="button" aria-label={`编辑${rule.title}`} className={s.icon} onClick={()=>setDraft({...rule})}><Pencil size={14}/></button><button type="button" aria-label={`删除${rule.title}`} className={s.icon} onClick={()=>{if(rule.kind==='debt'&&rule.debtTarget==='loan'&&(wallet.fixedDebtBalances?.[rule.id]??rule.principal??0)>0){onChange((wallet.fixedRules||[]).map(r=>r.id===rule.id?{...r,enabled:false}:r));setError('这笔借款尚有本金，已停止自动还款；请先结清或修正本金再删除。');}else onChange((wallet.fixedRules||[]).filter(r=>r.id!==rule.id));}}><Trash2 size={14}/></button></div><p className={s.note}>{rule.kind==='income'?'收入':rule.kind==='debt'?'还款':'支出'} · {formatCurrencyAmount(rule.amount,rule.currency)} · 每月{rule.day==='last'?'月底':`${rule.day}日`} · {rule.startMonth}起{rule.endMonth?`至${rule.endMonth}`:''}</p>{!hideBalances&&rule.kind==='debt'&&rule.debtTarget==='loan'&&<p className={s.note}>剩余本金：{formatCurrencyAmount(wallet.fixedDebtBalances?.[rule.id]??rule.principal??0,rule.currency)}</p>}{Object.entries(wallet.fixedSettlements||{}).some(([k,v])=>k.startsWith(rule.id+':')&&v.status==='pending')&&<p className={s.notice}>有到期项目余额不足，下一次打开／刷新时重试。</p>}</div>)}
+ {error&&!draft&&<p role="status" className={s.notice}>{error}</p>}
+ {draft&&<div className={s.editor}>
+ <label>类型<select value={draft.kind} onChange={e=>change({kind:e.target.value as WalletFixedRule['kind'],debtTarget:'credit'})}><option value="income">固定收入</option><option value="expense">固定支出</option><option value="debt">债务还款</option></select></label>
+ <label>名称<input value={draft.title} maxLength={100} onChange={e=>change({title:e.target.value})} placeholder="例如父亲信托、工资、房租"/></label>
+ <div className={s.row}><label>每月金额<input type="number" min="0" step="any" value={draft.amount||''} onChange={e=>change({amount:Number(e.target.value)})}/></label><label>币种<select value={draft.currency} onChange={e=>change({currency:e.target.value})}>{WALLET_CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}</select></label></div>
+ <label>每月日期<select value={draft.day} onChange={e=>change({day:e.target.value==='last'?'last':Number(e.target.value)})}>{Array.from({length:31},(_,i)=><option key={i+1} value={i+1}>{i+1}日</option>)}<option value="last">月底</option></select></label><p className={s.note}>29～31日遇到短月按当月最后一天处理。</p>
+ <div className={s.row}><label>开始月份<input type="month" value={draft.startMonth} onChange={e=>change({startMonth:e.target.value})}/></label><label>结束月份 · 可不填<input type="month" value={draft.endMonth||''} onChange={e=>change({endMonth:e.target.value||undefined})}/></label></div>
+ {draft.kind==='debt'&&<><label>对应欠款<select value={draft.debtTarget||'credit'} onChange={e=>change({debtTarget:e.target.value as 'credit'|'loan'})}><option value="credit">本账户信用卡</option><option value="loan">单独的贷款／借款</option></select></label>{draft.debtTarget==='loan'&&<><label>这笔借款的初始本金<input type="number" min="0" step="any" value={draft.principal??''} onChange={e=>change({principal:Number(e.target.value)})}/></label><label>每月金额中偿还的本金<input type="number" min="0" step="any" value={draft.principalPerPayment??''} onChange={e=>change({principalPerPayment:Number(e.target.value)})}/></label><p className={s.note}>其余金额按本期利息处理；本金还清后停止扣款。修改初始本金会重新设置这笔欠款。</p></>}</>}
+ {error&&<p role="alert" className={s.notice}>{error}</p>}<div className={s.row}><button type="button" className={s.button} onClick={save}>保存规则</button><button type="button" className={s.secondary} onClick={()=>{setDraft(null);setError('');}}>取消</button></div>
+ </div>}
+ </section>;
+}
