@@ -1772,7 +1772,8 @@
   flex-direction: column;
   overflow: hidden;
   color: var(--c-text-title);
-  background: color-mix(in srgb, var(--c-card) 88%, rgba(255,255,255,0.76));
+  background: var(--c-page-body-bg, var(--c-input));
+  background: color-mix(in srgb, var(--c-page-body-bg, var(--c-input)) 96%, var(--c-card));
   backdrop-filter: blur(26px) saturate(1.18);
   -webkit-backdrop-filter: blur(26px) saturate(1.18);
   border-radius: 24px;
@@ -2074,7 +2075,8 @@
   overflow: hidden;
   border-radius: 16px;
   border: 1px solid rgba(255,255,255,0.2);
-  background: color-mix(in srgb, var(--c-card, var(--c-input)) 78%, transparent);
+  background: var(--c-page-body-bg, var(--c-input));
+  background: color-mix(in srgb, var(--c-page-body-bg, var(--c-input)) 96%, var(--c-card));
   backdrop-filter: blur(28px) saturate(170%);
   -webkit-backdrop-filter: blur(28px) saturate(170%);
   box-shadow:
