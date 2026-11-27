@@ -13,17 +13,21 @@ function RangeRow({label,value,onChange,max=100,unit="%"}:{label:string;value:nu
   return <label className="menu-item call-visual-range"><span className="menu-label">{label}</span><div className="menu-right gap-2"><input className="ui-slider" type="range" min={0} max={max} step={1} aria-label={label} value={value} onChange={e=>onChange(Number(e.target.value))}/><span className="menu-desc tabular-nums">{value}{unit}</span></div></label>;
 }
 function SurfaceEditor({title,value,onChange}:{title:string;value:CallVisualSurface;onChange:(patch:Partial<CallVisualSurface>)=>void}){
-  return <section className="call-visual-subsection"><div className="menu-item"><span className="menu-label font-medium">{title}</span></div>
+  const [open,setOpen]=useState(false);
+  return <section className="call-visual-subsection"><button type="button" className="menu-item w-full" aria-expanded={open} onClick={()=>setOpen(v=>!v)}><span className="menu-label font-medium">{title}</span><span className="menu-right">{open?<ChevronDown size={16}/>:<ChevronRight size={16}/>}</span></button>
+    {open&&<>
     <ColorRow label="背景颜色" value={value.color} onChange={color=>onChange({color})}/>
     <ColorRow label="文字颜色" value={value.text} onChange={text=>onChange({text})}/>
     <RangeRow label="不透明度" value={value.opacity} onChange={opacity=>onChange({opacity})}/>
     <RangeRow label="圆角" value={value.radius} max={36} unit="px" onChange={radius=>onChange({radius})}/>
     <ColorRow label="阴影颜色" value={value.shadowColor} onChange={shadowColor=>onChange({shadowColor})}/>
     <RangeRow label="阴影强度" value={value.shadow} onChange={shadow=>onChange({shadow})}/>
+    </>}
   </section>;
 }
 export function CallVisualSettings({kind}:{kind:CallVisualKind}){
   const [group,setGroup]=useState(()=>readCallVisual(kind)),[open,setOpen]=useState(false),[name,setName]=useState(""),[selected,setSelected]=useState(""),[previewOpen,setPreviewOpen]=useState(false);
+  const [buttonsOpen,setButtonsOpen]=useState(false);
   const title=kind==="video"?"视频通话美化":"语音通话美化";
   function persist(next:CallVisualGroup){setGroup(next);const current=loadChatAppSettings();saveChatAppSettings({...current,callVisualAppearance:{...current.callVisualAppearance,[kind]:next}});}
   const update=(patch:Partial<CallVisualConfig>)=>persist({...group,config:normalizeCallVisual(kind,{...group.config,...patch})});
@@ -40,7 +44,7 @@ export function CallVisualSettings({kind}:{kind:CallVisualKind}){
         <RangeRow label="背景不透明度" value={c.backgroundOpacity} onChange={backgroundOpacity=>update({backgroundOpacity})}/>
         <SurfaceEditor title={kind==="video"?"对方气泡":"对方通话卡片"} value={c.other} onChange={p=>update({other:{...c.other,...p}})}/>
         <SurfaceEditor title={kind==="video"?"我方气泡":"我方通话卡片"} value={c.my} onChange={p=>update({my:{...c.my,...p}})}/>
-        {kind==="video"?<SurfaceEditor title="输入栏" value={c.input} onChange={p=>update({input:{...c.input,...p}})}/>:<section className="call-visual-subsection"><div className="menu-item"><span className="menu-label font-medium">通话按钮</span></div><ColorRow label="背景颜色" value={c.buttons.color} onChange={color=>update({buttons:{...c.buttons,color}})}/><ColorRow label="图标颜色" value={c.buttons.text} onChange={text=>update({buttons:{...c.buttons,text}})}/><RangeRow label="不透明度" value={c.buttons.opacity} onChange={opacity=>update({buttons:{...c.buttons,opacity}})}/></section>}
+        {kind==="video"?<SurfaceEditor title="输入栏" value={c.input} onChange={p=>update({input:{...c.input,...p}})}/>:<section className="call-visual-subsection"><button type="button" className="menu-item w-full" aria-expanded={buttonsOpen} onClick={()=>setButtonsOpen(v=>!v)}><span className="menu-label font-medium">通话按钮</span><span className="menu-right">{buttonsOpen?<ChevronDown size={16}/>:<ChevronRight size={16}/>}</span></button>{buttonsOpen&&<><ColorRow label="背景颜色" value={c.buttons.color} onChange={color=>update({buttons:{...c.buttons,color}})}/><ColorRow label="图标颜色" value={c.buttons.text} onChange={text=>update({buttons:{...c.buttons,text}})}/><RangeRow label="不透明度" value={c.buttons.opacity} onChange={opacity=>update({buttons:{...c.buttons,opacity}})}/></>}</section>}
         <div className="menu-item"><div className="menu-label-group"><span className="menu-label">美化预设</span><span className="menu-desc">语音与视频预设独立保存</span></div><select className="ui-input call-visual-preset" aria-label="选择美化预设" value={selected} onChange={e=>{const id=e.target.value;setSelected(id);const p=group.presets.find(p=>p.id===id);if(p){setName(p.name);persist({...group,config:normalizeCallVisual(kind,p.config)});}else setName("");}}><option value="">选择预设</option>{group.presets.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
         <div className="menu-item"><input className="ui-input flex-1 min-w-0" aria-label="预设名称" placeholder="预设名称" value={name} onChange={e=>setName(e.target.value)}/><button className="ui-btn ui-btn-outline shrink-0" type="button" disabled={!name.trim()} onClick={()=>{const id="call-visual-"+Date.now()+"-"+Math.random().toString(36).slice(2,6);persist({...group,presets:[...group.presets,{id,name:name.trim(),config:c}]});setSelected(id);}}>另存预设</button></div>
         {selectedPreset&&<div className="menu-item call-visual-preset-actions"><button type="button" className="ui-btn ui-btn-outline" disabled={!name.trim()} onClick={()=>persist({...group,presets:group.presets.map(p=>p.id===selected?{...p,name:name.trim()}:p)})}>重命名</button><button type="button" className="ui-btn ui-btn-outline" onClick={()=>persist({...group,presets:group.presets.map(p=>p.id===selected?{...p,config:c}:p)})}>保存修改</button><button type="button" className="ui-btn ui-btn-outline" onClick={()=>{if(!window.confirm("删除这个美化预设？"))return;persist({...group,presets:group.presets.filter(p=>p.id!==selected)});setSelected("");setName("");}}>删除</button></div>}
