@@ -6075,9 +6075,25 @@
 
 /* Error diagnostic float: reuse native quick-action panel, button scale and typography. */
 .error-diagnostics-layer { z-index:100002; }
-.prompt-viewer-float-button.error-diagnostics-ball { left:18px;right:auto;bottom:136px;
-  background:radial-gradient(circle at 44% 38%,rgba(246,200,118,.75),rgba(170,185,233,.38) 46%,transparent 76%);
-  box-shadow:0 0 20px 4px rgba(188,164,125,.13),0 5px 14px rgba(70,80,120,.10); }
+.prompt-viewer-float-button.error-diagnostics-ball {
+  left: 18px;
+  right: auto;
+  bottom: 136px;
+  background:
+    radial-gradient(circle at 42% 36%, rgba(246,200,118,0.78) 0%, rgba(230,184,126,0.52) 36%, rgba(170,185,233,0.2) 60%, transparent 76%);
+  box-shadow:
+    0 0 20px 4px rgba(230,184,126,0.14),
+    0 5px 14px rgba(188,164,125,0.11);
+}
+.prompt-viewer-float-button.error-diagnostics-ball::after {
+  background: radial-gradient(circle at 45% 40%, rgba(246,200,118,0.13) 0%, transparent 66%);
+}
+.prompt-viewer-float-button.error-diagnostics-ball:hover {
+  box-shadow: 0 0 28px 6px rgba(230,184,126,0.22), 0 5px 16px rgba(188,164,125,0.16);
+}
+.prompt-viewer-float-button.error-diagnostics-ball[data-dragging] {
+  box-shadow: 0 0 32px 8px rgba(230,184,126,0.26), 0 6px 18px rgba(188,164,125,0.18);
+}
 .error-diagnostics-overlay { position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:max(75px,calc(var(--safe-area-top,48px) + 18px)) 14px 18px;
   background:rgba(0,0,0,.20);box-sizing:border-box;pointer-events:auto; }
