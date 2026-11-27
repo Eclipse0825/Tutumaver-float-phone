@@ -1,4 +1,5 @@
 "use client";
+import { loadKeepAlive, saveKeepAlive } from "@/lib/keep-alive";
 import {isAndroidApp} from "@/lib/android-runtime";
 import {AndroidSettings} from "./settings/android-settings";
 
@@ -264,9 +265,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
 
     const handleKeepAliveChange = useCallback((next: boolean) => {
         setKeepAlive(next);
-        
-        // use-weixin-bridge 监听这个事件来起停保活（与微信 Bot 的启用状态无关）
-        
+        saveKeepAlive(next);
         onNotice(next ? "已开启后台保活" : "已关闭后台保活");
     }, [onNotice]);
 
@@ -376,7 +375,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
         setQuickActionEnabled(settings.quickActionEnabled === true);
         setErrorDiagnosticsEnabled(settings.errorDiagnosticsEnabled === true);
         setFloatingDockEnabled(settings.floatingDockEnabled === true);
-        
+        setKeepAlive(loadKeepAlive());
     }, []);
 
     // Listen for mascot navigation mode (e.g. jump to worldbook/regex tab)
@@ -461,6 +460,16 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                                     <div className="card-featured-desc">控制全局历史事件流中是否注入时间戳</div>
                                 </div>
                                 <Toggle checked={timeAware} onChange={handleTimeAwareChange} className="settings-toggle-control" />
+                            </div>
+                            <div className="app-card card-featured settings-toggle-card">
+                                <span className="card-icon card-icon-glass">
+                                    <GlassIcon name="keep-alive" />
+                                </span>
+                                <div className="card-featured-body">
+                                    <div className="card-featured-label">后台保活</div>
+                                    <div className="card-featured-desc">切到后台时尽量保持网页运行，主动消息与轮询不中断</div>
+                                </div>
+                                <Toggle checked={keepAlive} onChange={handleKeepAliveChange} className="settings-toggle-control" />
                             </div>
                             
                         </div>

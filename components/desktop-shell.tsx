@@ -1,4 +1,5 @@
 "use client";
+import { installKeepAlive } from "@/lib/keep-alive";
 import {SocialNotificationRuntime} from "@/components/social/app-notifications";
 import {preparePhoneOpening,discardPhoneOpening} from '@/lib/phone-opening';
 import {PhoneInspectionManager} from "@/components/chat/phone-inspection-manager";
@@ -1078,6 +1079,7 @@ const MusicShellOverlays = memo(function MusicShellOverlays({
 });
 
 export function DesktopShell({ initialThemeProfile, initialThemeAssets, initialLockEnabled, initialLockWallpaper }: DesktopShellProps) {
+  useEffect(() => installKeepAlive(), []);
   useEffect(()=>{const e=new Event("rabbit-inspection-runtime-start");window.dispatchEvent(e);},[]);
   useEffect(() => {
     const openTogether = () => {

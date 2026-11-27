@@ -1,3 +1,4 @@
+import { setKeepAliveCallActive } from "./keep-alive";
 import { fetchAndroidTts, usesAndroidTtsTransport } from "./android-tts";
 import { loadChatAppSettings } from "./chat-storage";
 // lib/tts-service.ts — 语音合成服务
@@ -366,6 +367,7 @@ export function isCallAudioSessionActive(){return _callAudioSessionActive;}
 /** 通话界面挂载时置 true、卸载/挂断时置 false（false 时立即挂起空闲的上下文）。 */
 export function setCallAudioSessionActive(active: boolean): void {
     _callAudioSessionActive = active;
+    setKeepAliveCallActive(active);
     if (!active && _audioCtx && !_activeGain) {
         try { void _audioCtx.suspend(); } catch { /* ignore */ }
     }
