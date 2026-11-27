@@ -1772,10 +1772,11 @@
   flex-direction: column;
   overflow: hidden;
   color: var(--c-text-title);
-  background: var(--c-page-body-bg, var(--c-input));
-  background: color-mix(in srgb, var(--c-page-body-bg, var(--c-input)) 96%, var(--c-card));
-  backdrop-filter: blur(26px) saturate(1.18);
-  -webkit-backdrop-filter: blur(26px) saturate(1.18);
+  /* Keep the themed surface opaque, even when a custom theme uses alpha colors. */
+  background: #F1F2F6;
+  background: linear-gradient(var(--c-page-body-bg, var(--c-input, #F1F2F6)), var(--c-page-body-bg, var(--c-input, #F1F2F6))), Canvas;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border-radius: 24px;
   box-shadow:
     0 16px 48px rgba(31, 54, 87, 0.14),
@@ -2075,10 +2076,11 @@
   overflow: hidden;
   border-radius: 16px;
   border: 1px solid rgba(255,255,255,0.2);
-  background: var(--c-page-body-bg, var(--c-input));
-  background: color-mix(in srgb, var(--c-page-body-bg, var(--c-input)) 96%, var(--c-card));
-  backdrop-filter: blur(28px) saturate(170%);
-  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  /* Keep the themed surface opaque, even when a custom theme uses alpha colors. */
+  background: #F1F2F6;
+  background: linear-gradient(var(--c-page-body-bg, var(--c-input, #F1F2F6)), var(--c-page-body-bg, var(--c-input, #F1F2F6))), Canvas;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   box-shadow:
     0 12px 40px rgba(0,0,0,0.12),
     0 2px 8px rgba(0,0,0,0.06);
@@ -6075,24 +6077,11 @@
 
 /* Error diagnostic float: reuse native quick-action panel, button scale and typography. */
 .error-diagnostics-layer { z-index:100002; }
+/* Inherit the prompt viewer's ball, glow and interaction states. */
 .prompt-viewer-float-button.error-diagnostics-ball {
   left: 18px;
   right: auto;
   bottom: 136px;
-  background:
-    radial-gradient(circle at 42% 36%, rgba(246,200,118,0.78) 0%, rgba(230,184,126,0.52) 36%, rgba(170,185,233,0.2) 60%, transparent 76%);
-  box-shadow:
-    0 0 20px 4px rgba(230,184,126,0.14),
-    0 5px 14px rgba(188,164,125,0.11);
-}
-.prompt-viewer-float-button.error-diagnostics-ball::after {
-  background: radial-gradient(circle at 45% 40%, rgba(246,200,118,0.13) 0%, transparent 66%);
-}
-.prompt-viewer-float-button.error-diagnostics-ball:hover {
-  box-shadow: 0 0 28px 6px rgba(230,184,126,0.22), 0 5px 16px rgba(188,164,125,0.16);
-}
-.prompt-viewer-float-button.error-diagnostics-ball[data-dragging] {
-  box-shadow: 0 0 32px 8px rgba(230,184,126,0.26), 0 6px 18px rgba(188,164,125,0.18);
 }
 .error-diagnostics-overlay { position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   padding:max(75px,calc(var(--safe-area-top,48px) + 18px)) 14px 18px;
