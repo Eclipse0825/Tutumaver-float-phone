@@ -1165,8 +1165,12 @@ export function ReadingViewer({ book, onBack }: Props) {
             const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
             const x = e.clientX - rect.left;
             const w = rect.width;
-            if (x < w * 0.3) { navigateWithFlip('backward'); return; }
-            if (x > w * 0.7) { navigateWithFlip('forward'); return; }
+            const y = e.clientY - rect.top;
+            // Only the lower corners turn pages. Other taps retain immersive mode.
+            if (y >= rect.height * 0.75) {
+                if (x < w * 0.3) { navigateWithFlip('backward'); return; }
+                if (x > w * 0.7) { navigateWithFlip('forward'); return; }
+            }
         }
 
         setImmersive(prev => !prev);
