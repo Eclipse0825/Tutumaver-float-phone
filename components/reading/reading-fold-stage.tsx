@@ -1,11 +1,11 @@
 "use client";
 import {useEffect,useLayoutEffect,useRef,useState,useId,type ReactNode,type PointerEvent,type MutableRefObject} from "react";
-import {readingFoldGeometry,foldClipPath,foldClamp,shouldCompleteReadingFold,type FoldPoint} from "@/lib/reading-fold-geometry";
+import {readingFoldGeometry,foldClipPath,foldClamp,type FoldPoint} from "@/lib/reading-fold-geometry";
 
 export type ReadingFoldDirection="forward"|"backward";
 export type ReadingFoldTarget={content:ReactNode;commit:()=>void};
 type Turn={dir:1|-1;corner:FoldPoint;point:FoldPoint;width:number;height:number;target:ReadingFoldTarget};
-type Drag={id:number;from:FoldPoint;last:FoldPoint;lastAt:number;velocity:number;moved:boolean};
+type Drag={id:number;from:FoldPoint;moved:boolean};
 type Props={pageKey:string;turnRef:MutableRefObject<((direction:ReadingFoldDirection)=>void)|null>;prepareTarget:(direction:ReadingFoldDirection)=>ReadingFoldTarget|null;disabled?:boolean;children:ReactNode};
 const interactive="button,input,select,textarea,a,[data-no-nav='true']";
 
@@ -61,34 +61,18 @@ export function ReadingFoldStage({pageKey,turnRef,prepareTarget,disabled,childre
  useLayoutEffect(()=>{turnRef.current=autoTurn;return()=>{turnRef.current=null;};});
  const down=(e:PointerEvent<HTMLDivElement>)=>{
   suppressClick.current=false;
-  if(disabled||active.current||drag.current||!e.isPrimary||(e.pointerType==="mouse"&&e.button!==0)||(e.target as HTMLElement).closest(interactive))return;
-  const p=point(e);drag.current={id:e.pointerId,from:p,last:p,lastAt:performance.now(),velocity:0,moved:false};
-  // Capture only once a horizontal swipe is recognized; plain taps retain existing click semantics.
+  if(disabled||active.current||!e.isPrimary||(e.pointerType==="mouse"&&e.button!==0)||(e.target as HTMLElement).closest(interactive))return;
+  drag.current={id:e.pointerId,from:point(e),moved:false};
  };
  const move=(e:PointerEvent<HTMLDivElement>)=>{
-  const d=drag.current;if(!d||d.id!==e.pointerId||settling.current)return;
-  const p=point(e),dx=p.x-d.from.x,dy=p.y-d.from.y,now=performance.now();
-  if(now>d.lastAt)d.velocity=(p.x-d.last.x)/(now-d.lastAt);d.last=p;d.lastAt=now;
-  let t=active.current;
-  if(!t){
-   if(Math.abs(dx)<7||Math.abs(dx)<Math.abs(dy)*.55)return;
-   d.moved=true;suppressClick.current=true;
-   if(!e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.setPointerCapture(e.pointerId);
-   t=makeTurn(dx<0?1:-1,d.from.y);if(!t)return;
-  }
-  const distance=Math.max(0,-t.dir*dx);
-  paint({...t,point:{x:t.corner.x-t.dir*foldClamp(distance,0,t.width*1.35),y:foldClamp(t.corner.y+dy,-t.height*.5,t.height*1.5)}});
-  e.preventDefault();
+  const d=drag.current;if(!d||d.id!==e.pointerId)return;
+  const p=point(e);
+  if(Math.hypot(p.x-d.from.x,p.y-d.from.y)>=9){d.moved=true;suppressClick.current=true;}
  };
  const end=(e:PointerEvent<HTMLDivElement>,cancel=false)=>{
   const d=drag.current;if(!d||d.id!==e.pointerId)return;
-  const t=active.current,p=point(e);drag.current=null;
-  if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);
-  if(t){
-   suppressClick.current=true;
-   const distance=-t.dir*(p.x-d.from.x),speed=performance.now()-d.lastAt<100?-t.dir*d.velocity:0;
-   animate(shouldCompleteReadingFold(distance,t.width,speed,cancel));
-  }else if(cancel||d.moved||Math.hypot(p.x-d.from.x,p.y-d.from.y)>=9)suppressClick.current=true;
+  const p=point(e);drag.current=null;
+  if(cancel||d.moved||Math.hypot(p.x-d.from.x,p.y-d.from.y)>=9)suppressClick.current=true;
  };
  const g=frame?readingFoldGeometry(frame.width,frame.height,frame.corner,frame.point):null;
  const front=frame&&g?foldClipPath(g.front,frame.width,frame.height):undefined;
