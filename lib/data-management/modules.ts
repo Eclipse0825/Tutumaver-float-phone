@@ -71,6 +71,7 @@ const PRIMARY_DATA_MODULES: DataModuleDefinition[] = [
           "pending_reply_",
           "ai_phone_chat_offline_turns:",
           "ai_phone_chat_offline_scenes:",
+          "ai_phone_chat_offline_reply_versions:",
           "ai_phone_chat_offline_story_music:",
           "ai_phone_chat_offline_image_draft:",
           "chat-offline-mode:",

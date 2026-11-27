@@ -147,14 +147,25 @@ export function annotateGroupHistory(
  * Parse the LLM output in [角色名]: format into per-character results.
  * Falls back: if no known name prefix found, assigns entire output to the first member.
  */
-import {faceToFaceInstruction,FACE_SCENE_ID,faceHistoryText} from "./chat-face-to-face";
+import {faceToFaceInstruction,FACE_SCENE_ID,faceHistoryText,splitFaceToFaceText} from "./chat-face-to-face";
 
 export function parseGroupChatResponse(
     text: string,
     nameToId: Map<string, string>,
-    face?: {actions:boolean},
+    face?: {actions:boolean;streaming?:boolean},
 ): { characterId: string; characterName: string; responseText: string }[] {
-    if(face){return text.split(/(【现场动作】[\s\S]*?【\/现场动作】)/g).flatMap(segment=>{if(segment.startsWith("【现场动作】")&&segment.endsWith("【/现场动作】"))return face.actions?[{characterId:FACE_SCENE_ID,characterName:"",responseText:segment}]:[];return segment.trim()?parseGroupChatResponse(segment,nameToId):[];});}
+    if (face) {
+        const results: {characterId:string;characterName:string;responseText:string}[] = [];
+        let lastSpeaker = "";
+        for (const segment of splitFaceToFaceText(text,{newFormat:face.actions,streaming:face.streaming})) {
+            if (segment.kind === "action") { if(face.actions) results.push({characterId:FACE_SCENE_ID,characterName:"",responseText:segment.text}); continue; }
+            const prefixes=[...segment.text.matchAll(/^\[([^\]\n]{1,32})\]:/gm)];
+            const speech = !prefixes.length && lastSpeaker ? `[${lastSpeaker}]: ${segment.text}` : segment.text;
+            results.push(...parseGroupChatResponse(speech,nameToId));
+            if(prefixes.length)lastSpeaker=prefixes[prefixes.length-1][1];
+        }
+        return results;
+    }
     const names = [...nameToId.keys()];
     // 通用切分：任何 [名字]: 行都开启新段落——包括被踢成员、冒用的用户名或
     // 幻觉名字。未知名字的段落随后被 nameToId 校验整段丢弃，防止其内容以
@@ -884,6 +895,7 @@ export async function generateGroupChatCompletion(
         directorInstruction: options?.directorInstruction,
         activeCall: options?.activeCall,
     });
+    const faceForParse = session.faceToFaceEnabled && !session.isSpectator && !options?.promptProfile && !options?.callFormatInstruction && appTags.includes("group_chat") && !appTags.some(tag => ["offline","voice","video"].includes(tag)) ? {actions:!!session.faceToFaceActions} : undefined;
     // A manually summoned video call may include one temporary camera frame.
     // Only attach it when image recognition is explicitly enabled.
     // Do not save this frame to the group message history.
@@ -989,7 +1001,7 @@ export async function generateGroupChatCompletion(
         // Push text to UI immediately before tool execution (parse per-character for proper avatar/name)
         if (callbacks?.onTextPart) {
             throwIfAborted(options?.signal);
-            const intermediateResults = parseGroupChatResponse(filteredOutput, nameToId, session.faceToFaceEnabled&&!options?.callFormatInstruction&&!options?.appTags?.some(t=>t==="offline"||t==="voice"||t==="video")?{actions:!!session.faceToFaceActions}:undefined);
+            const intermediateResults = parseGroupChatResponse(filteredOutput, nameToId, faceForParse);
             const responseRoundId = createResponseRoundId();
             const editableResponseText = buildEditableGroupRoundText(intermediateResults);
             for (const r of intermediateResults) {
@@ -1152,7 +1164,7 @@ export async function generateGroupChatCompletion(
 
     // Parse final output into per-character results
     throwIfAborted(options?.signal);
-    const parsed = parseGroupChatResponse(finalRawOutput, nameToId, session.faceToFaceEnabled&&!options?.callFormatInstruction&&!options?.appTags?.some(t=>t==="offline"||t==="voice"||t==="video")?{actions:!!session.faceToFaceActions}:undefined);
+    const parsed = parseGroupChatResponse(finalRawOutput, nameToId, faceForParse);
 
     const finalResults: typeof parsed = [];
     for (const r of parsed) {

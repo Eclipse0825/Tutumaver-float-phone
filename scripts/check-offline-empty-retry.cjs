@@ -4,7 +4,7 @@ const start=source.indexOf('    const offlineFooter = '),end=source.indexOf('\n 
 assert(start>=0&&end>start);
 const code=ts.transpileModule(source.slice(start,end)+'\nexports.footer=offlineFooter;',{fileName:'footer.tsx',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 const Icon=()=>React.createElement('i');let calls=0;
-const box={exports:{},React,OfflineSceneClock:Icon,Pencil:Icon,RotateCcw:Icon,Trash2:Icon,offlineTextCount:t=>t.length,formatChatUiTime:t=>t,session:{id:'s'},isOfflineGenerating:false,offlineSceneBusy:false,handleOfflineEditStart(){},handleOfflineRetryFrom(){calls++;},window:{confirm:()=>false}};
+const box={exports:{},React,OfflineSceneClock:Icon,ImagePlus:Icon,History:Icon,offlineReplyVersions:{},Pencil:Icon,RotateCcw:Icon,Trash2:Icon,offlineTextCount:t=>t.length,formatChatUiTime:t=>t,session:{id:'s'},isOfflineGenerating:false,offlineSceneBusy:false,handleOfflineEditStart(){},handleOfflineRetryFrom(){calls++;},window:{confirm:()=>false}};
 vm.runInNewContext(code,box);
 for(const turn of [{id:'a',userContent:'input',assistantContent:'answer',createdAt:'time'},{id:'b',userContent:'input',assistantContent:'',createdAt:'time'}]){
  const markup=renderToStaticMarkup(box.exports.footer(turn,'user',1));assert.equal(markup.includes('aria-label="重回线下回复"'),!turn.assistantContent,'only missing reply gets retry next to user input');

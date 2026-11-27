@@ -5,6 +5,8 @@ import { kvGet, kvRemove, kvSet, registerDynamicPrefix } from "./kv-db";
 
 const CHAT_OFFLINE_TURNS_PREFIX = "ai_phone_chat_offline_turns:";
 registerDynamicPrefix(CHAT_OFFLINE_TURNS_PREFIX);
+const CHAT_OFFLINE_REPLY_VERSIONS_PREFIX = "ai_phone_chat_offline_reply_versions:";
+registerDynamicPrefix(CHAT_OFFLINE_REPLY_VERSIONS_PREFIX);
 const CHAT_OFFLINE_SCENES_PREFIX = "ai_phone_chat_offline_scenes:";
 registerDynamicPrefix(CHAT_OFFLINE_SCENES_PREFIX);
 
@@ -189,11 +191,13 @@ export function saveChatOfflineTurns(sessionId: string, turns: ChatOfflineTurn[]
         .filter((turn): turn is ChatOfflineTurn => Boolean(turn))
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     kvSet(storageKey(sessionId), JSON.stringify(normalized));
+    pruneChatOfflineReplyVersions(sessionId, normalized);
 }
 
 export function clearChatOfflineTurns(sessionId: string): void {
     kvRemove(storageKey(sessionId));
     kvRemove(CHAT_OFFLINE_SCENES_PREFIX + sessionId);
+    kvRemove(CHAT_OFFLINE_REPLY_VERSIONS_PREFIX + sessionId);
 }
 
 export function appendChatOfflineTurn(input: {
@@ -225,6 +229,8 @@ export function appendChatOfflineTurn(input: {
         createdAt: new Date().toISOString(),
     };
     saveChatOfflineTurns(input.sessionId, [...loadChatOfflineTurns(input.sessionId), turn]);
+    // A successful new story turn confirms the selected replies. Failed requests never reach here.
+    confirmChatOfflineReplyVersions(input.sessionId);
     if(input.userContent.trim()) restoreChatListEntry(input.sessionId);
     return turn;
 }
@@ -244,7 +250,10 @@ export function updateChatOfflineTurn(
         };
         return updated;
     });
-    if (updated) saveChatOfflineTurns(sessionId, turns);
+    if (updated) {
+        saveChatOfflineTurns(sessionId, turns);
+        syncSelectedOfflineReplyVersion(sessionId, updated);
+    }
     return updated;
 }
 
@@ -408,3 +417,89 @@ export function loadOfflineImageDraft(sessionId:string):ChatOfflineImage|null {t
 export function saveOfflineImageDraft(sessionId:string,image:ChatOfflineImage|null){kvSet('ai_phone_chat_offline_image_draft:'+sessionId,JSON.stringify(image));}
 
 registerDynamicPrefix("ai_phone_chat_offline_image_draft:");
+
+
+/** Temporary alternatives live outside official turns, prompts, memories and archives. */
+export type ChatOfflineReplyFields = Pick<ChatOfflineTurn, "assistantContent" | "rawText" | "summary" | "summaryTag" | "reasoningText" | "thinkingText" | "thinkingTag">;
+export type ChatOfflineReplyVersion = ChatOfflineReplyFields & { id: string; retry: number };
+export type ChatOfflineReplyVersionSet = { selectedId: string; nextRetry: number; versions: ChatOfflineReplyVersion[] };
+const REPLY_FIELDS = ["assistantContent", "rawText", "summary", "summaryTag", "reasoningText", "thinkingText", "thinkingTag"] as const;
+function replyFields(turn: ChatOfflineReplyFields): ChatOfflineReplyFields {
+    return Object.fromEntries(REPLY_FIELDS.map(key => [key, turn[key]])) as ChatOfflineReplyFields;
+}
+function saveReplyVersionSets(sessionId: string, sets: Record<string, ChatOfflineReplyVersionSet>): void {
+    if (Object.keys(sets).length) kvSet(CHAT_OFFLINE_REPLY_VERSIONS_PREFIX + sessionId, JSON.stringify(sets));
+    else kvRemove(CHAT_OFFLINE_REPLY_VERSIONS_PREFIX + sessionId);
+}
+export function loadChatOfflineReplyVersionSets(sessionId: string): Record<string, ChatOfflineReplyVersionSet> {
+    try {
+        const raw = JSON.parse(kvGet(CHAT_OFFLINE_REPLY_VERSIONS_PREFIX + sessionId) || "{}");
+        const result: Record<string, ChatOfflineReplyVersionSet> = Object.create(null);
+        for (const [turnId, unknownSet] of Object.entries(raw)) {
+            const set = unknownSet as ChatOfflineReplyVersionSet;
+            if (!set || !Array.isArray(set.versions)) continue;
+            const valid = set.versions.filter(v => v && typeof v.id === "string" && Number.isSafeInteger(v.retry) && v.retry >= 0 && typeof v.assistantContent === "string" && typeof v.summary === "string" && typeof v.summaryTag === "string" && REPLY_FIELDS.every(key => v[key] === undefined || typeof v[key] === "string"));
+            const original = valid.find(v => v.retry === 0);
+            if (!original) continue;
+            const retries = valid.filter(v => v.retry > 0).sort((a,b) => a.retry-b.retry).slice(-5);
+            const versions = [original, ...retries].map(v => ({...replyFields(v), id:v.id, retry:v.retry}));
+            if (!versions.some(v => v.id === set.selectedId)) continue;
+            result[turnId] = { selectedId:set.selectedId, nextRetry:Math.max(Number.isSafeInteger(set.nextRetry) ? set.nextRetry : 1, ...versions.map(v => v.retry+1)), versions };
+        }
+        return result;
+    } catch { return {}; }
+}
+function pruneChatOfflineReplyVersions(sessionId: string, turns: ChatOfflineTurn[]): void {
+    const sets = loadChatOfflineReplyVersionSets(sessionId);
+    const existing = new Set(turns.filter(t => t.assistantContent.trim()).map(t => t.id));
+    let changed = false;
+    for (const id of Object.keys(sets)) if (!existing.has(id)) { delete sets[id]; changed = true; }
+    if (changed) saveReplyVersionSets(sessionId, sets);
+}
+function syncSelectedOfflineReplyVersion(sessionId: string, turn: ChatOfflineTurn): void {
+    const sets = loadChatOfflineReplyVersionSets(sessionId), set = sets[turn.id];
+    if (!set) return;
+    set.versions = set.versions.map(v => v.id === set.selectedId ? {...v,...replyFields(turn)} : v);
+    saveReplyVersionSets(sessionId, sets);
+}
+export function confirmChatOfflineReplyVersions(sessionId: string): void {
+    kvRemove(CHAT_OFFLINE_REPLY_VERSIONS_PREFIX + sessionId);
+}
+/** Compare immediately before commit; cancellation/empty responses are rejected by the caller too. */
+export function commitChatOfflineReplyRetry(sessionId: string, turnId: string, fields: ChatOfflineReplyFields, expectedTurns: string, expectedVersions?: string): ChatOfflineTurn {
+    const turns = loadChatOfflineTurns(sessionId), target = turns.find(t => t.id === turnId);
+    if (!target || JSON.stringify(turns) !== expectedTurns) throw new Error("记录已变化，未覆盖已有内容，请重试");
+    if (!fields.assistantContent.trim()) throw new Error("未生成正文，原记录保留");
+    const sets = loadChatOfflineReplyVersionSets(sessionId);
+    if (expectedVersions !== undefined && JSON.stringify(sets[turnId] || null) !== expectedVersions) throw new Error("回复版本已变化，未覆盖已有内容，请重试");
+    const previous = sets[turnId];
+    const updated = {...target,...replyFields(fields)};
+    const retry = previous?.nextRetry || 1;
+    const original = previous?.versions.find(v => v.retry === 0) || {...replyFields(target),id:"original",retry:0};
+    const version = {...replyFields(updated), id:`retry-${retry}`, retry};
+    saveChatOfflineTurns(sessionId, turns.map(t => t.id === turnId ? updated : t));
+    // After deleting an assistant reply there is no original text to offer; start history on the next retry.
+    if (target.assistantContent.trim()) {
+        sets[turnId] = { selectedId:version.id, nextRetry:retry+1, versions:[original,...(previous?.versions.filter(v => v.retry > 0) || []).slice(-4),version] };
+        saveReplyVersionSets(sessionId, sets);
+    }
+    return updated;
+}
+export function selectChatOfflineReplyVersion(sessionId: string, turnId: string, versionId: string, expectedTurns: string, expectedVersions?: string): ChatOfflineTurn {
+    const turns = loadChatOfflineTurns(sessionId), target = turns.find(t => t.id === turnId);
+    const sets = loadChatOfflineReplyVersionSets(sessionId), set = sets[turnId];
+    if (expectedVersions !== undefined && JSON.stringify(set || null) !== expectedVersions) throw new Error("回复版本已变化，请关闭后重新选择");
+    const version = set?.versions.find(v => v.id === versionId);
+    if (!target || !version || JSON.stringify(turns) !== expectedTurns) throw new Error("回复记录已变化，请关闭后重新选择");
+    const updated = {...target,...replyFields(version)};
+    saveChatOfflineTurns(sessionId, turns.map(t => t.id === turnId ? updated : t));
+    set.selectedId = version.id;
+    saveReplyVersionSets(sessionId, sets);
+    return updated;
+}
+export function mergeChatOfflineReplyVersions(sourceSessionId: string, targetSessionId: string): void {
+    const source = loadChatOfflineReplyVersionSets(sourceSessionId), target = loadChatOfflineReplyVersionSets(targetSessionId);
+    const ids = new Set(loadChatOfflineTurns(targetSessionId).map(t => t.id));
+    for (const [id, set] of Object.entries(source)) if (ids.has(id) && !target[id]) target[id] = set;
+    saveReplyVersionSets(targetSessionId, target);
+}

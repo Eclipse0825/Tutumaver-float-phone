@@ -1,4 +1,7 @@
 "use client";
+import {OfflineReplyVersionDialog} from "./offline-reply-version-dialog";
+import {commitChatOfflineReplyRetry,loadChatOfflineReplyVersionSets,selectChatOfflineReplyVersion} from "@/lib/chat-offline-storage";
+
 import {bubbleContextAnchor,placeChatContextMenu,type ContextMenuAnchor} from "./chat-context-menu-position";
 import {loadApiConfigs} from "@/lib/settings-storage";
 import { RecommendContactModal } from "./recommend-contact-modal";
@@ -47,7 +50,7 @@ import {FACE_SCENE_ID,faceActionText,parseUserFaceAction,canQuoteChatMessage} fr
 import { ChatStateDialog } from "./chat-state-dialog";
 import { generateChatCompletion, generateOfflineChatCompletion, flattenCompletionResult, ChatEngineError } from "@/lib/chat-engine";
 import { offlineSpeakerMap } from "@/lib/offline-speakers";
-import { RotateCcw, Volume2 } from "lucide-react";
+import { RotateCcw, Volume2, History } from "lucide-react";
 import { OfflineDialogueText } from "./offline-dialogue-text";
 import {OfflineImageAttachment,OfflineImageComposeDialog,OfflinePendingImage} from "./offline-image-attachment";
 import {OfflineMusicFloat} from "./offline-music-float";
@@ -1302,6 +1305,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
     const [offlineSceneBusy, setOfflineSceneBusy] = useState(false);
     const [theaterMode, setTheaterMode] = useState(() => kvGet(CHAT_THEATER_MODE_PREFIX + session.id) === "1");
     const [offlineTurns, setOfflineTurns] = useState<ChatOfflineTurn[]>([]);
+    const [offlineVersionTarget,setOfflineVersionTarget]=useState<string|null>(null);
+    const offlineReplyVersions=useMemo(()=>loadChatOfflineReplyVersionSets(session.id),[session.id,offlineTurns]);
+    useEffect(()=>setOfflineVersionTarget(null),[session.id,offlineMode]);
     const [offlineImageTarget,setOfflineImageTarget]=useState<{turnId:string;role:"user"|"assistant"}|null>(null);
     const [offlineImageDialog,setOfflineImageDialog]=useState(false);
     const [pendingOfflineImage,updatePendingOfflineImage]=useState<ChatOfflineImage|null>(()=>loadOfflineImageDraft(session.id));
@@ -3461,7 +3467,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     {
                         onReasoning: (t) => { roundReasoning = t; },
                         onStreamDelta: (delta) => {
-                            if (!isCurrentGeneration()) return;
+                            if (!isCurrentGeneration() || (session.faceToFaceEnabled && session.faceToFaceActions && !session.isSpectator)) return;
                             streamAccumRef.current += delta;
                             // 群聊全文解析较重：合并到 rAF 下一帧执行，避免一帧多段增量重复解析
                             if (streamParseFrameRef.current) return;
@@ -3509,7 +3515,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     {
                         onReasoning: (t) => { capturedReasoning = t; },
                         onStreamDelta: (delta) => {
-                            if (!isCurrentGeneration()) return;
+                            if (!isCurrentGeneration() || (session.faceToFaceEnabled && session.faceToFaceActions && !session.isSpectator)) return;
                             streamAccumRef.current += delta;
                             // 预览更新合并到 rAF 下一帧：每帧最多一次全文净化+setState，避免高频增量卡顿
                             if (streamParseFrameRef.current) return;
@@ -4043,7 +4049,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     onNativeToolAssistantTurn: async ({ content, rawContent, reasoning, openRouterReasoningDetails, toolCalls }) => {
                         if (!isCurrentGeneration()) return;
                         const nameToId = new Map(groupCharacters.map(item => [item.name, item.id]));
-                        const visibleResults = parseGroupChatResponse(content, nameToId)
+                        const visibleResults = parseGroupChatResponse(content, nameToId,session.faceToFaceEnabled&&!session.isSpectator?{actions:!!session.faceToFaceActions}:undefined)
                             .filter(item => item.responseText.trim());
                         if (visibleResults.length > 0) {
                             await processGroupParts(visibleResults, setMessages, generationGuard, reasoning, { instantReveal: isSessionStreamingEnabled(session, true) });
@@ -4100,7 +4106,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 }, {
                     onReasoning: (t) => { pendingReasoning = t; },
                     onStreamDelta: (delta) => {
-                        if (!isCurrentGeneration()) return;
+                        if (!isCurrentGeneration() || (session.faceToFaceEnabled && session.faceToFaceActions && !session.isSpectator)) return;
                         streamAccumRef.current += delta;
                         // 预览更新合并到 rAF 下一帧：每帧最多一次全文净化+setState，避免高频增量卡顿
                         if (streamParseFrameRef.current) return;
@@ -4588,6 +4594,9 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             const slot=resolveBinding(loadBindingConfig(),session.isGroup?undefined:session.contactId,session.isGroup?"group_chat":"chat");
             if(!loadApiConfigs().find(c=>c.id===slot.apiConfigId)?.enableImageRecognition){showChatToast("当前 API 未开启识图，请重新添加图片并选择手动识图");return false;}
         }
+        const currentOfflineTurns=loadChatOfflineTurns(session.id);
+        const offlineSendFingerprint=JSON.stringify(currentOfflineTurns);
+        const offlineSendVersions=JSON.stringify(loadChatOfflineReplyVersionSets(session.id));
         cancelFollowUp(session.id);
         setShowPlusMenu(false);
         setShowEmojiPanel(false);
@@ -4604,7 +4613,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
 
         void (async () => {
             try {
-                const history = buildOfflinePromptHistory(offlineTurns, currentText + offlineMusicContext(session.id), pendingOfflineImage||undefined);
+                const history = buildOfflinePromptHistory(currentOfflineTurns, currentText + offlineMusicContext(session.id), pendingOfflineImage||undefined);
                 const onOfflineDelta = (delta: string) => {
                     if (!isCurrentOfflineRun()) return;
                     offlineStreamAccumRef.current += delta;
@@ -4631,9 +4640,10 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     ? await generateGroupOfflineChatCompletion(session, history, { signal: offlineRun.controller.signal, onStreamDelta: onOfflineDelta })
                     : await generateOfflineChatCompletion(session, history, { signal: offlineRun.controller.signal, onStreamDelta: onOfflineDelta });
                 if (!isCurrentOfflineRun()) return;
-                const assistantContent = result.content.trim() || result.rawText.trim();
+                const assistantContent = result.content.trim();
                 if (!assistantContent) throw new Error("AI 没有返回线下正文");
                 
+                if(JSON.stringify(loadChatOfflineTurns(session.id))!==offlineSendFingerprint || JSON.stringify(loadChatOfflineReplyVersionSets(session.id))!==offlineSendVersions) throw new Error("线下记录已变化，未写入新剧情，请重试");
                 const saved = appendChatOfflineTurn({
                     sessionId: session.id,
                     userContent: currentText,
@@ -4648,7 +4658,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     assistantImage: pendingOfflineImage?.targetRole==="assistant"?pendingOfflineImage:undefined,
                 });
                 setPendingOfflineImage(null);
-                setOfflineTurns(prev => [...prev, saved]);
+                setOfflineTurns(loadChatOfflineTurns(session.id));
 
             } catch (error: any) {
                 if (!isCurrentOfflineRun() || isAbortLikeError(error)) return;
@@ -4734,6 +4744,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         if (!target.userContent.trim() && !session.isSpectator && index === 0) { showChatToast("本轮没有输入或前文可供重回"); return; }
         ensureChatOfflineScene(session.id, session.contactId);
         const fingerprint = JSON.stringify(turns);
+        const versionFingerprint = JSON.stringify(loadChatOfflineReplyVersionSets(session.id)[turnId] || null);
         cancelFollowUp(session.id); setActiveOfflineTarget(null); setIsOfflineGenerating(true);
         const run = createOfflineGenerationRun(session.id);
         try {
@@ -4743,7 +4754,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
             if (!isOfflineGenerationRunActive(session.id,run.runId)) return;
             if (JSON.stringify(loadChatOfflineTurns(session.id)) !== fingerprint) throw new Error("记录已变化，未覆盖已有内容，请重试");
             const content = result.content.trim(); if (!content) throw new Error("未生成正文，原记录保留");
-            updateChatOfflineTurn(session.id,turnId,{assistantContent:content,rawText:result.rawText,summary:'',summaryTag:result.summaryTag,reasoningText:result.reasoning,thinkingText:result.thinking,thinkingTag:result.thinkingTag});
+            commitChatOfflineReplyRetry(session.id,turnId,{assistantContent:content,rawText:result.rawText,summary:result.summary.trim(),summaryTag:result.summaryTag,reasoningText:result.reasoning,thinkingText:result.thinking,thinkingTag:result.thinkingTag},fingerprint,versionFingerprint);
             setOfflineTurns(loadChatOfflineTurns(session.id));
         } catch(error) { if (isOfflineGenerationRunActive(session.id,run.runId) && !isAbortLikeError(error)) showChatToast(`重回失败，原记录保留：${error instanceof Error ? error.message : String(error)}`,3000); }
         finally { if (finishOfflineGenerationRun(session.id,run.runId)) { setIsOfflineGenerating(false); setPendingOfflineUserText(''); setOfflineStreamPreview(null); offlineGenerationInputRef.current=''; } }
@@ -4941,11 +4952,12 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                 nameToId.set(groupCharacter.name, groupCharacter.id);
             });
             const historicalFace=roundMessages.some(m=>m.faceToFaceMode);
-            if (!hasKnownGroupSenderPrefix(editedResponseContent)&&!(historicalFace&&editedResponseContent.includes("【现场动作】"))) {
+            const historicalActions=historicalFace&&(roundMessages.some(m=>m.faceToFaceKind==="action")||session.faceToFaceActions===true);
+            if (!hasKnownGroupSenderPrefix(editedResponseContent)&&!(historicalFace&&editedResponseContent.includes("【"))) {
                 showChatToast("群聊编辑内容需要保留 [角色名]: 前缀");
                 return;
             }
-            const segments = parseGroupChatResponse(editedResponseContent, nameToId,historicalFace?{actions:true}:undefined);
+            const segments = parseGroupChatResponse(editedResponseContent, nameToId,historicalFace?{actions:historicalActions}:undefined);
             if (segments.length === 0) {
                 showChatToast("没有识别到可编辑的群聊成员前缀");
                 return;
@@ -5084,7 +5096,7 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
         const editedVisibleContent = session.isGroup && batchMessages[0]?.senderCharacterId
             ? applyGroupSelfNicknameTag(session, batchMessages[0].senderCharacterId, editedResponseContent)
             : editedResponseContent;
-        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(editedVisibleContent, previousState,batchMessages.some(m=>m.faceToFaceMode)?{actions:true}:undefined);
+        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue } = parseAIResponse(editedVisibleContent, previousState,batchMessages.some(m=>m.faceToFaceMode)?{actions:batchMessages.some(m=>m.faceToFaceKind==="action")||session.faceToFaceActions===true}:undefined);
         const parts = stripInvalidStickerParts(rawParts);
         const normalizedParts = normalizeEditedAssistantParts(parts).filter(part => !session.isGroup || part.mediaType !== "gift");
         if (normalizedParts.length === 0 && (statusPanel || innerMonologue)) {
@@ -5835,12 +5847,13 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
       const updated=updateChatOfflineTurn(session.id,target.turnId,{[field]:image});
       if(updated){setOfflineTurns(previous=>previous.map(turn=>turn.id===target.turnId?updated:turn));}
     };
-    const offlineFooter = (turn: ChatOfflineTurn, role: "user" | "assistant", index: number) => <div className="offline-card-footer" onPointerDown={e => e.stopPropagation()}>
+    const offlineFooter = (turn: ChatOfflineTurn, role: "user" | "assistant", index: number) => <div className="offline-card-footer" style={{flexWrap:"wrap"}} onPointerDown={e => e.stopPropagation()}>
         <span title="记录时间；故事时间可通过时钟单独调整">#{index} · {offlineTextCount(role === "user" ? turn.userContent : turn.assistantContent)}字 · {formatChatUiTime(turn.createdAt)}</span>
-        <div>{role === "assistant" ? <OfflineSceneClock sessionId={session.id} disabled={isOfflineGenerating || offlineSceneBusy} /> : null}
+        <div style={{flexWrap:"wrap",justifyContent:"flex-end"}}>{role === "assistant" ? <OfflineSceneClock sessionId={session.id} disabled={isOfflineGenerating || offlineSceneBusy} /> : null}
         <button type="button" aria-label="为此条线下内容配图" title="配图" disabled={isOfflineGenerating || offlineSceneBusy} onClick={()=>{setOfflineImageTarget({turnId:turn.id,role});setOfflineImageDialog(true);}}><ImagePlus size={15}/></button>
         <button type="button" aria-label={role === "user" ? "编辑我的线下内容" : "编辑角色线下内容"} disabled={isOfflineGenerating || offlineSceneBusy} onClick={() => handleOfflineEditStart(turn, role)}><Pencil size={15} /></button>
         {(role === "assistant" || !turn.assistantContent.trim()) ? <button type="button" aria-label="重回线下回复" title="重回整段回复" disabled={isOfflineGenerating || offlineSceneBusy} onClick={() => void handleOfflineRetryFrom(turn.id)}><RotateCcw size={15}/></button> : null}
+        {role === "assistant" && (offlineReplyVersions[turn.id]?.versions.length || 0)>1 ? <button type="button" aria-label="选择线下回复版本" title="回复版本" disabled={isOfflineGenerating || offlineSceneBusy} onClick={()=>setOfflineVersionTarget(turn.id)}><History size={15}/></button> : null}
         <button type="button" aria-label={role === "user" ? "删除我的线下内容" : "删除角色线下内容"} disabled={isOfflineGenerating || offlineSceneBusy} onClick={() => {
             if (!window.confirm("删除这条线下内容？")) return;
             const next = offlineTurns.map(item => item.id === turn.id ? { ...item, ...(role === "user" ? { userContent: "" } : { assistantContent: "", rawText: "", reasoningText: "", thinkingText: "" }), summary: "" } : item).filter(item => item.userContent.trim() || item.assistantContent.trim());
@@ -7151,6 +7164,8 @@ export function ChatRoom({ session, onBack, onDeleted }: ChatRoomProps) {
                     onClose={() => setMediaDetailMsg(null)}
                 />
             )}
+
+            {offlineMode && offlineVersionTarget && <OfflineReplyVersionDialog key={`${session.id}:${offlineVersionTarget}`} sessionId={session.id} turnId={offlineVersionTarget} busy={isOfflineGenerating||offlineSceneBusy} onClose={()=>setOfflineVersionTarget(null)} onUse={(id,fingerprint,versionsFingerprint)=>{if(isOfflineGenerating||offlineSceneBusy)return;selectChatOfflineReplyVersion(session.id,offlineVersionTarget,id,fingerprint,versionsFingerprint);setOfflineTurns(loadChatOfflineTurns(session.id));setOfflineVersionTarget(null);}}/>}
 
             {editingOfflineTarget && (
                 <div className="chat-html-overlay" onClick={() => { setEditingOfflineTarget(null); setEditingOfflineContent(""); }}>

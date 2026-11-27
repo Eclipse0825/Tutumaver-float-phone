@@ -4,7 +4,7 @@
 // 用户可以按组选择合并或保留；选了「不合并」的组记签名，成员不变就不再提醒。
 
 import { loadCharacters } from "./character-storage";
-import { getLastChatOfflineTurn, loadChatOfflineTurns, saveChatOfflineTurns } from "./chat-offline-storage";
+import { getLastChatOfflineTurn, loadChatOfflineTurns, saveChatOfflineTurns, mergeChatOfflineReplyVersions } from "./chat-offline-storage";
 import { removeChatSessionCompletely } from "./chat-session-remove";
 import {
     getLastVisibleSessionMessage,
@@ -136,6 +136,7 @@ export function mergeDuplicateSessionGroup(group: DuplicateSessionGroup): void {
                 ...sourceTurns.map(turn => ({ ...turn, sessionId: target.id })),
             ]);
         }
+        mergeChatOfflineReplyVersions(source.id, target.id);
         // 剩下的空壳连同散装状态一并清掉
         removeChatSessionCompletely(source.id);
     }
